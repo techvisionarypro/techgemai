@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>techGem AI</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+  </script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+      color: #333;
+      transition: background 0.5s, color 0.5s;
+    }
+    .dark-mode {
+      background: #121212;
+      color: #eee;
+    }
+    h1, h2 { text-align: center; }
+    .btn {
+      padding: 10px;
+      margin: 5px;
+      cursor: pointer;
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 4px;
+    }
+    .btn:hover { background: #0056b3; }
+    .hidden { display: none; }
+    .btn-group, .menu { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+    #chat-container, #about-author, #introduction, #history-container {
+      width: 90%;
+      max-width: 800px;
+      margin: auto;
+    }
+    textarea { width: 100%; resize: vertical; }
+    .chat-section {
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      padding: 15px;
+      background: #e9f7ff;
+      border-radius: 5px;
+      position: relative;
+    }
+    .dark-mode .chat-section {
+      background: #1e1e1e;
+      color: #eee;
+      border-color: #444;
+    }
+    .history-item {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      background: #fff;
+      border-radius: 5px;
+    }
+    .dark-mode .history-item { background: #1e1e1e; border-color: #444; }
+    .response-tools { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .markdown-output pre {
+      position: relative;
+      background: #222;
+      color: #fff;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+    .markdown-output pre button.copy-code {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      background: #444;
+      border: none;
+      color: white;
+      cursor: pointer;
+      padding: 5px 10px;
+      border-radius: 3px;
+    }
+    .markdown-output {
+      line-height: 1.6;
+    }
+    .markdown-output h1 { font-size: 2em; border-bottom: 2px solid #ccc; padding-bottom: 5px; }
+    .markdown-output h2 { font-size: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+    .markdown-output h3 { font-size: 1.2em; }
+    .markdown-output ul, .markdown-output ol { margin: 10px 0; padding-left: 20px; }
+    .markdown-output code:not(pre code) { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }
+    .dark-mode .markdown-output code:not(pre code) { background: #333; }
+    .error-message { color: #d32f2f; font-weight: bold; }
+    .success-message { color: #2e7d32; font-weight: bold; }
+  </style>
+</head>
+<body onload="initialize()">
+
+  <button class="btn" onclick="refreshPage()">Refresh Page</button>
+  <p id="greeting"></p>
+
+  <section id="introduction">
+    <h2>Welcome to techGem AI</h2>
+    <p>Interact with a powerful AI assistant. Ask questions, upload files, and explore seamless conversations!</p>
+  </section>
+
+  <section id="chat-with-ai">
+    <h2>How can I assist you today?</h2>
+    <textarea id="user-input" rows="10" cols="80" placeholder="Ask anything..."></textarea>
+    <button class="btn" onclick="pastePrompt()">Paste Prompt</button>
+    <p><strong>Word Count:</strong> <span id="word-count">0</span></p>
+    <p>Upload an image, PDF, or TXT file:</p>
+    <input type="file" id="file-input" accept=".txt,.pdf,image/*" class="btn" />
+    <div class="btn-group">
+      <button class="btn" onclick="sendPrompt()">Send Message</button>
+      <button class="btn" onclick="clearChat()">New Chat</button>
+      <button class="btn" onclick="searchGoogle()">Search on Google</button>
+      <button class="btn" onclick="toggleDarkMode()">Toggle Theme</button>
+      <button class="btn" onclick="openPromptAsText()">Download Prompt</button>
+    </div>
+    <h3 id="conversation-heading" class="hidden">Conversations</h3>
+    <div id="chat-container"></div>
+    <div class="menu">
+      <button class="btn" onclick="toggleHistory()">Toggle History</button>
+      <button class="btn" onclick="deleteHistory()">Clear History</button>
+      <button class="btn" onclick="exportHistory()">Export History</button>
+    </div>
+  </section>
+
+  <section id="history-container" class="hidden">
+    <h2>Chat History</h2>
+    <div id="history-list"></div>
+  </section>
+
+  <script>
+    let chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
+    let chatCounter = chatHistory.length;
+    let speechRate = 1;
+    let fileText = "";
+    let imageBase64 = "";
+    let isPageLoaded = false;
+
+    // Configure marked.js for enhanced Markdown support
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      pedantic: false,
+      sanitize: false,
+      smartLists: true,
+      smartypants: true
+    });
+
+    async function initialize() {
+      await checkStoragePermissions();
+      updateGreeting();
+      setInterval(updateGreeting, 1000);
+      document.getElementById('user-input').addEventListener('input', updateWordCount);
+      document.getElementById('file-input').addEventListener('change', handleFileUpload);
+      loadDraft();
+      showHistory();
+      isPageLoaded = true;
+    }
+
+    async function checkStoragePermissions() {
+      try {
+        if (!window.isSecureContext) {
+          displayMessage('Storage Access API is not available in non-secure contexts (use HTTPS).', 'error');
+          return;
+        }
+
+        if ('storageAccessAPI' in document) {
+          try {
+            await document.requestStorageAccess();
+            displayMessage('Storage permissions granted.', 'success');
+          } catch (err) {
+            displayMessage(`Failed to request storage permissions: ${err.message}`, 'error');
+          }
+        } else if (navigator.permissions && navigator.permissions.query) {
+          const permissionStatus = await navigator.permissions.query({ name: 'storage-access' });
+          if (permissionStatus.state === 'granted') {
+            displayMessage('Storage permissions granted.', 'success');
+          } else if (permissionStatus.state === 'prompt') {
+            try {
+              await document.requestStorageAccess();
+              displayMessage('Storage permissions requested.', 'success');
+            } catch (err) {
+              displayMessage(`Failed to request storage permissions: ${err.message}`, 'error');
+            }
+          } else {
+            displayMessage('Storage permissions denied.', 'error');
+          }
+        } else {
+          displayMessage('Storage Access API is not supported in this browser.', 'error');
+        }
+      } catch (err) {
+        displayMessage(`Error checking storage permissions: ${err.message}`, 'error');
+      }
+    }
+
+    function displayMessage(message, type) {
+      const container = document.getElementById('chat-container');
+      const msgDiv = document.createElement('div');
+      msgDiv.className = type === 'error' ? 'error-message' : 'success-message';
+      msgDiv.textContent = message;
+      container.prepend(msgDiv);
+      setTimeout(() => msgDiv.remove(), 5000);
+    }
+
+    function updateGreeting() {
+      const now = new Date();
+      const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
+      document.getElementById('greeting').innerText = `${greeting}, today is ${now.toDateString()} and it's ${now.toLocaleTimeString()}.`;
+    }
+
+    function updateWordCount() {
+      const text = document.getElementById('user-input').value;
+      const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+      document.getElementById('word-count').innerText = words.length;
+      localStorage.setItem("draft", text);
+    }
+
+    async function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      try {
+        if (file.type.startsWith("image/")) {
+          const reader = new FileReader();
+          reader.onload = () => imageBase64 = reader.result.split(',')[1];
+          reader.readAsDataURL(file);
+          displayMessage('Image uploaded successfully.', 'success');
+        } else if (file.type === "application/pdf") {
+          fileText = await extractPdfText(file);
+          displayMessage('PDF content extracted successfully.', 'success');
+        } else if (file.type === "text/plain") {
+          const reader = new FileReader();
+          reader.onload = () => fileText = reader.result;
+          reader.readAsText(file);
+          displayMessage('Text file uploaded successfully.', 'success');
+        } else {
+          displayMessage('Unsupported file type.', 'error');
+        }
+      } catch (err) {
+        displayMessage(`Error processing file: ${err.message}`, 'error');
+      }
+    }
+
+    async function extractPdfText(file) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map(item => item.str).join(' ') + '\n';
+        }
+        return text;
+      } catch (err) {
+        displayMessage('Error extracting PDF text.', 'error');
+        return '[Error extracting PDF content]';
+      }
+    }
+
+    async function sendPrompt() {
+      const input = document.getElementById('user-input').value.trim();
+      const combinedInput = input + (fileText ? '\n\n[Uploaded File Content]:\n' + fileText : '');
+      if (!combinedInput && !imageBase64) {
+        displayMessage('Please enter a prompt or upload a file.', 'error');
+        return;
+      }
+
+      document.getElementById("conversation-heading").classList.remove("hidden");
+
+      const chatBlock = document.createElement('div');
+      chatBlock.classList.add('chat-section');
+
+      const userElem = document.createElement('div');
+      userElem.className = 'markdown-output';
+      userElem.innerHTML = `<strong>You Said:</strong><br>${marked.parse(combinedInput || "[Image content]")}`;
+
+      const aiElem = document.createElement('div');
+      const aiContent = document.createElement('div');
+      aiContent.className = 'markdown-output';
+      aiContent.innerHTML = `<strong>AI Said:</strong><br><span>AI is typing...</span>`;
+      aiElem.appendChild(aiContent);
+
+      chatBlock.appendChild(userElem);
+      chatBlock.appendChild(aiElem);
+      document.getElementById('chat-container').prepend(chatBlock);
+
+      try {
+        const apiKey = "AIzaSyDYeLxp7Jp5qSypbVBPy9v_XYmz7Sc1qfs";
+        const headers = { 'Content-Type': 'application/json' };
+        const contextParts = chatHistory.flatMap(chat => [{ text: chat.userInput }, { text: chat.aiResponse }]);
+
+        const data = {
+          contents: [{
+            parts: [
+              ...contextParts,
+              ...(combinedInput ? [{ text: combinedInput }] : []),
+              ...(imageBase64 ? [{
+                inlineData: {
+                  mimeType: "image/jpeg",
+                  data: imageBase64
+                }
+              }] : [])
+            ]
+          }]
+        };
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const reply = result.candidates?.[0]?.content?.parts?.[0]?.text || "No response.";
+        const rendered = marked.parse(reply);
+
+        aiContent.innerHTML = `<strong>AI Said:</strong><br>${rendered}`;
+
+        // Add copy code buttons to code blocks
+        aiContent.querySelectorAll("pre code").forEach(codeBlock => {
+          const btn = document.createElement("button");
+          btn.textContent = "Copy Code";
+          btn.className = "copy-code";
+          btn.onclick = () => navigator.clipboard.writeText(codeBlock.textContent)
+            .then(() => displayMessage('Code copied to clipboard!', 'success'))
+            .catch(err => displayMessage(`Failed to copy code: ${err.message}`, 'error'));
+          codeBlock.parentElement.insertBefore(btn, codeBlock);
+        });
+
+        const toolBox = document.createElement('div');
+        toolBox.classList.add('response-tools');
+        toolBox.innerHTML = `
+          <button class="btn" onclick="copyResponse(\`${reply.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">Copy</button>
+          <button class="btn" onclick="shareResponse(\`${reply.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">Share</button>
+          <button class="btn" onclick="regenerateReply(\`${combinedInput.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`, this)">Regenerate</button>
+          <button class="btn" onclick="deleteThisChat(this)">Delete This Chat</button>
+          <button class="btn" onclick="speakNow(\`${reply.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">Listen</button>
+        `;
+        aiElem.appendChild(toolBox);
+
+        saveToHistory(combinedInput, reply);
+        localStorage.removeItem("draft");
+        document.getElementById('user-input').value = '';
+        imageBase64 = "";
+        fileText = "";
+        updateWordCount();
+      } catch (err) {
+        aiContent.innerHTML = `<strong>AI Said:</strong><br><span class="error-message">Error: ${err.message}</span>`;
+      }
+    }
+
+    function copyResponse(text) {
+      navigator.clipboard.writeText(text)
+        .then(() => displayMessage('Response copied to clipboard!', 'success'))
+        .catch(err => displayMessage(`Failed to copy text: ${err.message}`, 'error'));
+    }
+
+    function shareResponse(text) {
+      if (navigator.share) {
+        navigator.share({
+          title: 'AI Response',
+          text: text
+        }).catch(err => displayMessage(`Error sharing: ${err.message}`, 'error'));
+      } else {
+        navigator.clipboard.writeText(text)
+          .then(() => displayMessage('Text copied to clipboard for sharing.', 'success'))
+          .catch(err => displayMessage(`Failed to copy text: ${err.message}`, 'error'));
+      }
+    }
+
+    function deleteThisChat(button) {
+      const chatSection = button.closest('.chat-section');
+      if (chatSection) {
+        chatSection.remove();
+        if (!document.querySelector('.chat-section')) {
+          document.getElementById("conversation-heading").classList.add("hidden");
+        }
+      }
+    }
+
+    function regenerateReply(prompt, button) {
+      document.getElementById('user-input').value = prompt;
+      sendPrompt();
+    }
+
+    function saveToHistory(userInput, aiResponse) {
+      const chat = {
+        userInput,
+        aiResponse,
+        date: new Date().toLocaleString(),
+        chatNumber: ++chatCounter
+      };
+      chatHistory.push(chat);
+      localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+      showHistory();
+    }
+
+    function showHistory() {
+      const container = document.getElementById('history-list');
+      container.innerHTML = '';
+      chatHistory.forEach(chat => {
+        const item = document.createElement('div');
+        item.classList.add('history-item');
+        item.innerHTML = `
+          <div><strong>${chat.date} (Chat #${chat.chatNumber})</strong></div>
+          <div><em>You:</em> ${marked.parse(chat.userInput || '[Image content]')}</div>
+          <div><em>AI:</em> ${marked.parse(chat.aiResponse)}</div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function clearChat() {
+      document.getElementById('user-input').value = '';
+      document.getElementById('chat-container').innerHTML = '';
+      document.getElementById("conversation-heading").classList.add("hidden");
+      updateWordCount();
+      displayMessage('Chat cleared.', 'success');
+    }
+
+    function deleteHistory() {
+      localStorage.removeItem('chatHistory');
+      chatHistory = [];
+      chatCounter = 0;
+      showHistory();
+      displayMessage('Chat history cleared.', 'success');
+    }
+
+    function toggleHistory() {
+      const historyContainer = document.getElementById('history-container');
+      historyContainer.classList.toggle('hidden');
+      displayMessage(historyContainer.classList.contains('hidden') ? 'History hidden.' : 'History shown.', 'success');
+    }
+
+    function exportHistory() {
+      try {
+        const blob = new Blob([JSON.stringify(chatHistory, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `chat_history_${new Date().toISOString()}.json`;
+        link.click();
+        displayMessage('Chat history exported.', 'success');
+      } catch (err) {
+        displayMessage(`Error exporting history: ${err.message}`, 'error');
+      }
+    }
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark-mode');
+      displayMessage(`Theme switched to ${document.body.classList.contains('dark-mode') ? 'dark' : 'light'} mode.`, 'success');
+    }
+
+    function loadDraft() {
+      const draft = localStorage.getItem("draft");
+      if (draft) {
+        document.getElementById('user-input').value = draft;
+        updateWordCount();
+      }
+    }
+
+    function searchGoogle() {
+      const query = document.getElementById('user-input').value;
+      if (query) {
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+        displayMessage('Search opened in new tab.', 'success');
+      } else {
+        displayMessage('Please enter a search query.', 'error');
+      }
+    }
+
+    function openPromptAsText() {
+      const prompt = document.getElementById('user-input').value;
+      if (!prompt) {
+        displayMessage('No prompt to download.', 'error');
+        return;
+      }
+      try {
+        const blob = new Blob([prompt], { type: 'text/plain' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `prompt_${new Date().toISOString()}.txt`;
+        link.click();
+        displayMessage('Prompt downloaded.', 'success');
+      } catch (err) {
+        displayMessage(`Error downloading prompt: ${err.message}`, 'error');
+      }
+    }
+
+    function pastePrompt() {
+      navigator.clipboard.readText()
+        .then(text => {
+          document.getElementById('user-input').value = text;
+          updateWordCount();
+          displayMessage('Prompt pasted from clipboard.', 'success');
+        })
+        .catch(err => displayMessage(`Failed to paste prompt: ${err.message}`, 'error'));
+    }
+
+    function speakNow(text) {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = speechRate;
+        speechSynthesis.speak(utterance);
+        displayMessage('Speaking response.', 'success');
+      } catch (err) {
+        displayMessage(`Error in speech synthesis: ${err.message}`, 'error');
+      }
+    }
+
+    function refreshPage() {
+      if (isPageLoaded) {
+        location.reload();
+      }
+    }
+  </script>
+</body>
+</html>
